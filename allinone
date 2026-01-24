@@ -209,6 +209,7 @@
 
   function norm(s){ return (s == null ? "" : String(s)).replace(/\u00A0/g," ").trim(); }
   function up(s){ return norm(s).toUpperCase().replace(/\s+/g," ").trim(); }
+  function key(s){ return up(s).replace(/[^A-Z0-9А-ЯЁ]+/g, " ").replace(/\s+/g, " ").trim(); }
 
   function pubhtmlToCsv(url){
     try{
@@ -438,6 +439,8 @@
   }
   function getCardUid(card){
     if(!card) return "";
+    var dataUid = card.getAttribute("data-product-uid") || card.getAttribute("data-product-id") || card.getAttribute("data-uid");
+    if(dataUid) return String(dataUid).trim();
     var link = card.querySelector(SETTINGS.CARD.linkSelector);
     var href = link ? link.getAttribute("href") : "";
     if(!href) return "";
@@ -490,7 +493,7 @@
     for(var c=0;c<cards.length;c++){
       var card = cards[c];
       var uid = getCardUid(card);
-      var title = up(getCardTitle(card));
+      var title = key(getCardTitle(card));
       var ok = false;
       if(uid && allowedUID[uid]) ok = true;
       if(!ok && title && allowedTitle[title]) ok = true;
