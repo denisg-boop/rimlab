@@ -1,0 +1,538 @@
+<!-- TCF ALL-IN-ONE v1 (UI + Filter) -->
+
+<!-- ===== MOBILE UI ===== -->
+<style>
+  .tcfm-root, .tcfm-root *{ box-sizing:border-box; }
+  .tcfm-root{
+    width:100%;
+    font-family: Yfont, Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    letter-spacing:-0.05em;
+    color:#1A1A1A;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .tcfm-wrap{ width:100%; padding:0 20px; }
+  .tcfm-card{
+    width:100%; max-width:393px; margin:24px auto;
+    background:#F3F4F6; border-radius:15px; padding:26px 18px 22px;
+  }
+  .tcfm-label{ display:block; margin:10px 0 6px; font-size:18px; font-weight:400; padding-left:10px; }
+  .tcfm-field{ position:relative; }
+  .tcfm-select{
+    width:100%; height:45px; border:none; outline:none; border-radius:15px;
+    background:#FEFEFE; padding:0 44px 0 48px; font-size:18px; font-weight:500; color:#1A1A1A;
+    appearance:none; -webkit-appearance:none;
+    background-image:url('data:image/svg+xml;utf8,<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg"><path d="M6 9l6 6 6-6" stroke="%23757575" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    background-repeat:no-repeat; background-position:right 14px center; background-size:24px 24px;
+  }
+  .tcfm-select:invalid{ color:#A0A0A0; font-weight:400; }
+  .tcfm-icon{
+    position:absolute; left:14px; top:50%; transform:translateY(-50%);
+    width:22px; height:22px; border-radius:6px; overflow:hidden; display:none; pointer-events:none;
+  }
+  .tcfm-icon img{ width:100%; height:100%; object-fit:contain; }
+  .tcfm-btn{
+    width:100%; height:45px; margin-top:16px; border:none; border-radius:15px;
+    background:#1A1A1A; color:#FEFEFE; font-size:18px; font-weight:500; cursor:pointer; transition:all .25s ease;
+  }
+  .tcfm-btn:hover{ background:#F18042; color:#1A1A1A; }
+  @media (max-width:767px){
+    .tcfm-card{ max-width:100%; margin:20px 0; }
+  }
+</style>
+
+<div class="tcfm-root" id="tcf-mobile">
+  <div class="tcfm-wrap">
+    <div class="tcfm-card">
+      <label class="tcfm-label" for="tcfm-brand">Марка авто</label>
+      <div class="tcfm-field">
+        <span class="tcfm-icon" id="tcfm-brandIcon"><img id="tcfm-brandIconImg" alt=""></span>
+        <select class="tcfm-select" id="tcfm-brand" required>
+          <option value="" disabled selected>Выберите марку</option>
+        </select>
+      </div>
+
+      <label class="tcfm-label" for="tcfm-series">Серия</label>
+      <div class="tcfm-field">
+        <select class="tcfm-select" id="tcfm-series" required>
+          <option value="" disabled selected>Выберите серию</option>
+        </select>
+      </div>
+
+      <label class="tcfm-label" for="tcfm-body">Кузов</label>
+      <div class="tcfm-field">
+        <select class="tcfm-select" id="tcfm-body" required>
+          <option value="" disabled selected>Выберите кузов</option>
+        </select>
+      </div>
+
+      <button class="tcfm-btn" type="button" id="tcfm-apply">Подобрать</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== DESKTOP UI ===== -->
+<style>
+  .tcfd-root, .tcfd-root *{ box-sizing:border-box; }
+  .tcfd-root{
+    font-family: Yfont, Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    letter-spacing:-0.05em;
+    color:#1A1A1A;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .tcfd-bg{
+    position:relative; width:100%; max-width:1365px; height:300px; margin:0 auto;
+    background:#F3F4F6; border-radius:30px; overflow:hidden;
+  }
+  .tcfd-label{
+    position:absolute; height:26px; display:flex; align-items:center; justify-content:flex-start;
+    font-size:24px; font-weight:400;
+  }
+  .tcfd-field{
+    position:absolute; width:330px; height:60px; background:#FEFEFE; border-radius:25px; overflow:visible;
+  }
+  .tcfd-select{
+    appearance:none; -webkit-appearance:none; width:100%; height:100%;
+    border:none; outline:none; background:#FEFEFE; border-radius:25px;
+    padding:0 52px 0 52px; font-size:20px; font-weight:500; letter-spacing:inherit; color:#1A1A1A;
+  }
+  .tcfd-select:invalid{ color:#A0A0A0; font-weight:400; }
+  .tcfd-icon{
+    position:absolute; left:14px; top:50%; transform:translateY(-50%);
+    width:25px; height:25px; border-radius:8px; overflow:hidden; display:none; pointer-events:none; z-index:2;
+  }
+  .tcfd-icon img{ width:100%; height:100%; object-fit:contain; }
+  .tcfd-arrow{
+    position:absolute; width:35px; height:35px; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; z-index:3;
+  }
+  .tcfd-btn{
+    position:absolute; width:330px; height:60px; border:none; outline:none; background:#1A1A1A;
+    border-radius:25px; color:#FEFEFE; font-size:24px; font-weight:400; cursor:pointer; transition:all .25s ease; z-index:3;
+  }
+  .tcfd-btn:hover{ background:#F18042; color:#1A1A1A; }
+  .tcfd-car{
+    position:absolute; right:0; top:50%; transform:translateY(-50%);
+    width:440px; max-width:50%; height:auto; object-fit:contain; pointer-events:none; z-index:1;
+  }
+  @media (max-width: 1000px){
+    .tcfd-car{ right:-20px; z-index:0; }
+    .tcfd-field, .tcfd-label, .tcfd-btn, .tcfd-arrow{ z-index:2; }
+  }
+</style>
+
+<div class="tcfd-root" id="tcf-desktop" style="padding:20px 0;">
+  <div class="tcfd-bg">
+    <div class="tcfd-label" style="left:69px; top:48px; width:240px;">Марка авто</div>
+    <div class="tcfd-label" style="left:429px; top:48px; width:240px;">Серия</div>
+    <div class="tcfd-label" style="left:69px; top:160px; width:240px;">Кузов</div>
+
+    <div class="tcfd-field" style="left:51px; top:79px;">
+      <span class="tcfd-icon" id="tcfd-brandIcon"><img id="tcfd-brandIconImg" alt=""></span>
+      <select class="tcfd-select" id="tcfd-brand" required>
+        <option value="" disabled selected>Выберите марку</option>
+      </select>
+    </div>
+
+    <div class="tcfd-field" style="left:411px; top:79px;">
+      <select class="tcfd-select" id="tcfd-series" required>
+        <option value="" disabled selected>Выберите серию</option>
+      </select>
+    </div>
+
+    <div class="tcfd-field" style="left:51px; top:191px;">
+      <select class="tcfd-select" id="tcfd-body" required>
+        <option value="" disabled selected>Выберите кузов</option>
+      </select>
+    </div>
+
+    <button class="tcfd-btn" type="button" id="tcfd-apply" style="left:411px; top:191px;">Подобрать</button>
+
+    <div class="tcfd-arrow" style="left:325px; top:93px;">
+      <svg width="35" height="35" viewBox="0 0 35 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8.75 13.125L17.5 21.875L26.25 13.125" stroke="#757575" stroke-width="2.91667" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="tcfd-arrow" style="left:684px; top:93px;">
+      <svg width="35" height="35" viewBox="0 0 35 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8.75 13.125L17.5 21.875L26.25 13.125" stroke="#757575" stroke-width="2.91667" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="tcfd-arrow" style="left:328px; top:204px;">
+      <svg width="35" height="35" viewBox="0 0 35 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8.75 13.125L17.5 21.875L26.25 13.125" stroke="#757575" stroke-width="2.91667" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <img class="tcfd-car"
+      src="https://static.tildacdn.com/tild3163-3630-4263-b564-323135356535/amg.png"
+      alt="Автомобиль" loading="lazy" decoding="async">
+  </div>
+</div>
+
+<!-- ===== FILTER + LOADER ===== -->
+<style>
+  #tcf-noresults {
+    display:none; margin:16px 0; padding:12px 16px; border-radius:10px;
+    background:#fff5f5; color:#b40000; font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  }
+  .tcf-hidden{ display:none !important; }
+  #tcf-results-grid{ display:flex; flex-wrap:wrap; gap:0; }
+</style>
+
+<div id="tcf-noresults">Нет подходящих дисков</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var SETTINGS = {
+    SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSD_RlVif74yW6a16kwBb4OSqt4OLXPPIjehIxIFqRC9PvmKfTejpn61LOttkiT86Iv3A0bORAxrvwm/pubhtml?gid=693646388&single=true",
+    STORE: {
+      gridSelector: ".js-store-grid-cont, .t-store__grid-cont, .t-store__grid, .js-store-grid",
+      cardSelector: ".js-product, .t-store__card, .js-store-prod, .t-card, .t-store__product"
+    },
+    CARD: {
+      linkSelector: "a[href*='/tproduct/']",
+      titleSelector: ".t-store__card__title, .t-name, .js-store-prod-name, .t-card__title"
+    },
+    CACHE_TTL_MS: 2 * 60 * 1000,
+    FORCE_REFRESH: false,
+    DBG: false
+  };
+
+  function norm(s){ return (s == null ? "" : String(s)).replace(/\u00A0/g," ").trim(); }
+  function up(s){ return norm(s).toUpperCase().replace(/\s+/g," ").trim(); }
+
+  function pubhtmlToCsv(url){
+    try{
+      var u = new URL(url);
+      var gid = u.searchParams.get("gid") || "";
+      u.pathname = u.pathname.replace(/\/pubhtml$/i, "/pub");
+      u.search = "";
+      u.searchParams.set("output","csv");
+      if(gid) u.searchParams.set("gid", gid);
+      return u.toString();
+    }catch(e){ return url; }
+  }
+
+  function csvParse(text){
+    var rows = [], row = [], cur = "", inQ = false;
+    for(var i=0;i<text.length;i++){
+      var ch = text[i], next = text[i+1];
+      if(ch === '"'){
+        if(inQ && next === '"'){ cur+='"'; i++; }
+        else inQ = !inQ;
+        continue;
+      }
+      if(!inQ && ch === ","){ row.push(cur); cur=""; continue; }
+      if(!inQ && (ch === "\n" || ch === "\r")){
+        if(ch === "\r" && next === "\n") i++;
+        row.push(cur); rows.push(row); row=[]; cur=""; continue;
+      }
+      cur += ch;
+    }
+    if(cur.length || row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+
+  function findCol(headers, name){
+    var target = up(name);
+    for(var i=0;i<headers.length;i++) if(up(headers[i]) === target) return i;
+    for(var j=0;j<headers.length;j++) if(up(headers[j]).indexOf(target) >= 0) return j;
+    return -1;
+  }
+
+  function parseCompat(raw){
+    var s = norm(raw);
+    if(!s) return [];
+    var parts = s.split(";");
+    var out = [];
+    for(var i=0;i<parts.length;i++){
+      var seg = norm(parts[i]).replace(/\s+/g," ");
+      if(!seg) continue;
+      var tokens = seg.split(" ");
+      if(tokens.length >= 2){
+        var body = up(tokens[tokens.length-1]);
+        var series = up(tokens.slice(0,-1).join(" "));
+        out.push({ series: series, body: body });
+      }else{
+        out.push({ series: up(seg), body: "—" });
+      }
+    }
+    return out;
+  }
+
+  function buildTree(rows){
+    var headers = rows[0] || [];
+    var iBrand = findCol(headers, "Brand");
+    var iComp  = findCol(headers, "Characteristics:Совместимость");
+    var iUid   = findCol(headers, "Tilda UID");
+    var iTitle = findCol(headers, "Title");
+    if(iBrand < 0 || iComp < 0) throw new Error("CSV: нет колонок Brand/Characteristics:Совместимость");
+
+    var tree = {}, index = {};
+    for(var r=1;r<rows.length;r++){
+      var row = rows[r] || [];
+      var brand = up(row[iBrand]);
+      var comp  = norm(row[iComp]);
+      var uid   = norm(row[iUid]);
+      var title = norm(row[iTitle]);
+      if(!brand || !comp) continue;
+
+      var pairs = parseCompat(comp);
+      if(!pairs.length) continue;
+
+      if(!tree[brand]) tree[brand] = {};
+      if(!index[brand]) index[brand] = {};
+
+      for(var p=0;p<pairs.length;p++){
+        var series = pairs[p].series;
+        var body = pairs[p].body || "—";
+
+        if(!tree[brand][series]) tree[brand][series] = [];
+        if(tree[brand][series].indexOf(body) === -1) tree[brand][series].push(body);
+
+        if(!index[brand][series]) index[brand][series] = {};
+        if(!index[brand][series][body]) index[brand][series][body] = [];
+        if(uid) index[brand][series][body].push({ uid: uid, title: title });
+        else if(title) index[brand][series][body].push({ uid: "", title: title });
+      }
+    }
+    var brands = Object.keys(tree).sort();
+    for(var b=0;b<brands.length;b++){
+      var brandKey = brands[b];
+      var seriesKeys = Object.keys(tree[brandKey]).sort();
+      for(var s=0;s<seriesKeys.length;s++){
+        tree[brandKey][seriesKeys[s]].sort();
+      }
+    }
+    return { tree: tree, index: index, brands: brands };
+  }
+
+  var CACHE_KEY = "tcf_cache_v1:" + SETTINGS.SHEET_PUBHTML_URL;
+  function cacheGet(){
+    try{
+      var raw = localStorage.getItem(CACHE_KEY);
+      if(!raw) return null;
+      var obj = JSON.parse(raw);
+      if(Date.now() - obj.ts > SETTINGS.CACHE_TTL_MS) return null;
+      return obj.data;
+    }catch(e){ return null; }
+  }
+  function cacheSet(data){
+    try{ localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data })); }catch(e){}
+  }
+
+  function loadSheet(){
+    if(window.__TCF_DATA && !SETTINGS.FORCE_REFRESH) return Promise.resolve(window.__TCF_DATA);
+    var cached = cacheGet();
+    if(cached && !SETTINGS.FORCE_REFRESH){ window.__TCF_DATA = cached; return Promise.resolve(cached); }
+    var csvUrl = pubhtmlToCsv(SETTINGS.SHEET_PUBHTML_URL);
+    return fetch(csvUrl, { cache: "no-store" })
+      .then(function(r){ if(!r.ok) throw new Error("CSV fetch failed: " + r.status); return r.text(); })
+      .then(function(text){ var data = buildTree(csvParse(text)); window.__TCF_DATA = data; cacheSet(data); return data; });
+  }
+
+  function fillSelect(select, items, placeholder){
+    if(!select) return;
+    select.innerHTML = "";
+    var o0 = document.createElement("option");
+    o0.value=""; o0.disabled=true; o0.selected=true; o0.textContent=placeholder;
+    select.appendChild(o0);
+    for(var i=0;i<items.length;i++){
+      var opt=document.createElement("option");
+      opt.value=items[i]; opt.textContent=items[i];
+      select.appendChild(opt);
+    }
+  }
+
+  function getUI(){
+    return {
+      dBrand: document.getElementById("tcfd-brand"),
+      dSeries: document.getElementById("tcfd-series"),
+      dBody: document.getElementById("tcfd-body"),
+      dApply: document.getElementById("tcfd-apply"),
+      mBrand: document.getElementById("tcfm-brand"),
+      mSeries: document.getElementById("tcfm-series"),
+      mBody: document.getElementById("tcfm-body"),
+      mApply: document.getElementById("tcfm-apply")
+    };
+  }
+
+  function saveSelection(brand, series, body){
+    try{ localStorage.setItem("tcf_selection", JSON.stringify({brand:brand,series:series,body:body})); }catch(e){}
+  }
+  function loadSelection(){
+    try{ var raw = localStorage.getItem("tcf_selection"); if(!raw) return null; return JSON.parse(raw); }catch(e){ return null; }
+  }
+
+  function updateSeries(data, brand){
+    var list = (data.tree[brand]) ? Object.keys(data.tree[brand]).sort() : [];
+    fillSelect(getUI().dSeries, list, "Выберите серию");
+    fillSelect(getUI().mSeries, list, "Выберите серию");
+    fillSelect(getUI().dBody, [], "Выберите кузов");
+    fillSelect(getUI().mBody, [], "Выберите кузов");
+  }
+
+  function updateBodies(data, brand, series){
+    var bodies = (data.tree[brand] && data.tree[brand][series]) ? data.tree[brand][series] : [];
+    fillSelect(getUI().dBody, bodies, "Выберите кузов");
+    fillSelect(getUI().mBody, bodies, "Выберите кузов");
+  }
+
+  function initUI(data){
+    var ui = getUI();
+    var brands = data.brands || [];
+    fillSelect(ui.dBrand, brands, "Выберите марку");
+    fillSelect(ui.mBrand, brands, "Выберите марку");
+    fillSelect(ui.dSeries, [], "Выберите серию");
+    fillSelect(ui.mSeries, [], "Выберите серию");
+    fillSelect(ui.dBody, [], "Выберите кузов");
+    fillSelect(ui.mBody, [], "Выберите кузов");
+
+    var saved = loadSelection();
+    if(saved && saved.brand){
+      ui.dBrand.value = saved.brand; ui.mBrand.value = saved.brand;
+      updateSeries(data, saved.brand);
+      if(saved.series){
+        ui.dSeries.value = saved.series; ui.mSeries.value = saved.series;
+        updateBodies(data, saved.brand, saved.series);
+        if(saved.body){
+          ui.dBody.value = saved.body; ui.mBody.value = saved.body;
+        }
+      }
+    }
+
+    if(ui.dBrand) ui.dBrand.addEventListener("change", function(){ updateSeries(data, this.value); updateBodies(data, this.value, null); saveSelection(this.value,"",""); });
+    if(ui.mBrand) ui.mBrand.addEventListener("change", function(){ updateSeries(data, this.value); updateBodies(data, this.value, null); saveSelection(this.value,"",""); });
+
+    if(ui.dSeries) ui.dSeries.addEventListener("change", function(){ updateBodies(data, ui.dBrand.value, this.value); saveSelection(ui.dBrand.value,this.value,""); });
+    if(ui.mSeries) ui.mSeries.addEventListener("change", function(){ updateBodies(data, ui.mBrand.value, this.value); saveSelection(ui.mBrand.value,this.value,""); });
+
+    if(ui.dBody) ui.dBody.addEventListener("change", function(){ saveSelection(ui.dBrand.value, ui.dSeries.value, this.value); });
+    if(ui.mBody) ui.mBody.addEventListener("change", function(){ saveSelection(ui.mBrand.value, ui.mSeries.value, this.value); });
+
+    if(ui.dApply) ui.dApply.addEventListener("click", applyFilter);
+    if(ui.mApply) ui.mApply.addEventListener("click", applyFilter);
+  }
+
+  function getStoreGrid(){
+    var candidates = SETTINGS.STORE.gridSelector.split(",");
+    for(var i=0;i<candidates.length;i++){
+      var el = document.querySelector(candidates[i].trim());
+      if(el) return el;
+    }
+    return null;
+  }
+  function getCards(grid){
+    if(!grid) return [];
+    var list = grid.querySelectorAll(SETTINGS.STORE.cardSelector);
+    return Array.prototype.slice.call(list || []);
+  }
+  function getCardUid(card){
+    if(!card) return "";
+    var link = card.querySelector(SETTINGS.CARD.linkSelector);
+    var href = link ? link.getAttribute("href") : "";
+    if(!href) return "";
+    var m = href.match(/\/tproduct\/\d+\-(\d{6,})/i);
+    return (m && m[1]) ? m[1] : "";
+  }
+  function getCardTitle(card){
+    if(!card) return "";
+    var tEl = card.querySelector(SETTINGS.CARD.titleSelector);
+    return tEl ? norm(tEl.textContent) : "";
+  }
+
+  function showNoResults(show){
+    var el = document.getElementById("tcf-noresults");
+    if(el) el.style.display = show ? "block" : "none";
+  }
+
+  function resetFilter(showOriginal){
+    var grid = getStoreGrid();
+    var result = document.getElementById("tcf-results-grid");
+    if(result && result.parentNode) result.parentNode.removeChild(result);
+    if(grid && showOriginal !== false) grid.classList.remove("tcf-hidden");
+  }
+
+  function filterDom(matches){
+    var grid = getStoreGrid();
+    if(!grid) return;
+    var cards = getCards(grid);
+    if(!cards.length) return;
+
+    var result = document.getElementById("tcf-results-grid");
+    if(!result){
+      result = document.createElement("div");
+      result.id = "tcf-results-grid";
+      grid.parentNode.insertBefore(result, grid);
+    }
+    result.innerHTML = "";
+
+    var allowedUID = {}, allowedTitle = {};
+    for(var i=0;i<matches.length;i++){
+      if(matches[i].uid) allowedUID[matches[i].uid] = true;
+      if(matches[i].title) allowedTitle[up(matches[i].title)] = true;
+    }
+
+    var found = 0;
+    for(var c=0;c<cards.length;c++){
+      var card = cards[c];
+      var uid = getCardUid(card);
+      var title = up(getCardTitle(card));
+      var ok = false;
+      if(uid && allowedUID[uid]) ok = true;
+      else if(!uid && title && allowedTitle[title]) ok = true;
+
+      if(ok){ result.appendChild(card); found++; }
+    }
+
+    grid.classList.add("tcf-hidden");
+    showNoResults(found === 0);
+    try{ result.scrollIntoView({behavior:"smooth", block:"start"}); }catch(e){}
+  }
+
+  function applyFilter(){
+    loadSheet().then(function(data){
+      var ui = getUI();
+      var brand = ui.dBrand && ui.dBrand.value ? ui.dBrand.value : (ui.mBrand ? ui.mBrand.value : "");
+      var series = ui.dSeries && ui.dSeries.value ? ui.dSeries.value : (ui.mSeries ? ui.mSeries.value : "");
+      var body = ui.dBody && ui.dBody.value ? ui.dBody.value : (ui.mBody ? ui.mBody.value : "");
+
+      if(!brand || !series || !body){ alert("Выберите марку, серию и кузов."); return; }
+
+      var matches = (((data.index[brand] || {})[series] || {})[body]) || [];
+      if(!matches.length){ showNoResults(true); resetFilter(false); return; }
+
+      showNoResults(false);
+      filterDom(matches);
+    });
+  }
+
+  function observeCatalog(){
+    var grid = getStoreGrid();
+    if(!grid) return;
+    var observer = new MutationObserver(function(){
+      var saved = loadSelection();
+      if(saved && saved.brand && saved.series && saved.body){ applyFilter(); }
+    });
+    observer.observe(grid, { childList:true, subtree:true });
+  }
+
+  function init(){
+    loadSheet().then(function(data){ initUI(data); observeCatalog(); })
+      .catch(function(e){ alert("Ошибка загрузки данных: " + e.message); });
+  }
+
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+  else init();
+})();
+</script>
+
+<!-- ЧЕК-ЛИСТ:
+1) Если селекты пустые — проверьте ссылку SHEET_PUBHTML_URL.
+2) Если фильтр не видит карточки — проверьте STORE.gridSelector и STORE.cardSelector.
+3) Если не видит UID — проверьте CARD.linkSelector.
+4) Если дырки — убедитесь, что создаётся #tcf-results-grid и скрывается исходная сетка. -->
