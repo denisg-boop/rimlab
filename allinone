@@ -11,6 +11,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  #tcf-mobile{ display:none; }
+  @media (max-width:767px){
+    #tcf-mobile{ display:block; }
+    #tcf-desktop{ display:none; }
+  }
   .tcfm-wrap{ width:100%; padding:0 20px; }
   .tcfm-card{
     width:100%; max-width:393px; margin:24px auto;
@@ -204,6 +209,7 @@
 
   function norm(s){ return (s == null ? "" : String(s)).replace(/\u00A0/g," ").trim(); }
   function up(s){ return norm(s).toUpperCase().replace(/\s+/g," ").trim(); }
+  function key(s){ return up(s).replace(/[^A-Z0-9А-ЯЁ]+/g, " ").replace(/\s+/g, " ").trim(); }
 
   function pubhtmlToCsv(url){
     try{
@@ -433,11 +439,20 @@
   }
   function getCardUid(card){
     if(!card) return "";
+    var dataUid = card.getAttribute("data-product-uid") || card.getAttribute("data-product-id") || card.getAttribute("data-uid");
+    if(dataUid) return String(dataUid).trim();
     var link = card.querySelector(SETTINGS.CARD.linkSelector);
     var href = link ? link.getAttribute("href") : "";
     if(!href) return "";
-    var m = href.match(/\/tproduct\/\d+\-(\d{6,})/i);
-    return (m && m[1]) ? m[1] : "";
+    var m = href.match(/\/tproduct\/\d+\-(\d+)/i);
+    if(m && m[1]) return m[1];
+    var m2 = href.match(/product(?:id|uid)?=([0-9]+)/i);
+    return (m2 && m2[1]) ? m2[1] : "";
+  }
+  function getCardHref(card){
+    if(!card) return "";
+    var link = card.querySelector(SETTINGS.CARD.linkSelector);
+    return link ? (link.getAttribute("href") || "") : "";
   }
   function getCardTitle(card){
     if(!card) return "";
@@ -471,20 +486,39 @@
     }
     result.innerHTML = "";
 
-    var allowedUID = {}, allowedTitle = {};
+    var allowedUID = {}, allowedTitle = {}, allowedTitleList = [];
     for(var i=0;i<matches.length;i++){
       if(matches[i].uid) allowedUID[matches[i].uid] = true;
-      if(matches[i].title) allowedTitle[up(matches[i].title)] = true;
+      if(matches[i].title){
+        var titleKey = key(matches[i].title);
+        allowedTitle[titleKey] = true;
+        allowedTitleList.push(titleKey);
+      }
     }
 
     var found = 0;
     for(var c=0;c<cards.length;c++){
       var card = cards[c];
       var uid = getCardUid(card);
-      var title = up(getCardTitle(card));
+      var href = getCardHref(card);
+      var title = key(getCardTitle(card));
       var ok = false;
       if(uid && allowedUID[uid]) ok = true;
-      else if(!uid && title && allowedTitle[title]) ok = true;
+      if(!ok && href){
+        for(var uidKey in allowedUID){
+          if(href.indexOf(uidKey) !== -1){ ok = true; break; }
+        }
+      }
+      if(!ok && title && allowedTitle[title]) ok = true;
+      if(!ok && title && allowedTitleList.length){
+        for(var t=0;t<allowedTitleList.length;t++){
+          var allowed = allowedTitleList[t];
+          if(title.indexOf(allowed) !== -1 || allowed.indexOf(title) !== -1){
+            ok = true;
+            break;
+          }
+        }
+      }
 
       if(ok){ result.appendChild(card); found++; }
     }
