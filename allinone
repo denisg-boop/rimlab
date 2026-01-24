@@ -11,6 +11,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+  #tcf-mobile{ display:none; }
+  @media (max-width:767px){
+    #tcf-mobile{ display:block; }
+    #tcf-desktop{ display:none; }
+  }
   .tcfm-wrap{ width:100%; padding:0 20px; }
   .tcfm-card{
     width:100%; max-width:393px; margin:24px auto;
@@ -436,7 +441,7 @@
     var link = card.querySelector(SETTINGS.CARD.linkSelector);
     var href = link ? link.getAttribute("href") : "";
     if(!href) return "";
-    var m = href.match(/\/tproduct\/\d+\-(\d{6,})/i);
+    var m = href.match(/\/tproduct\/\d+\-(\d+)/i);
     return (m && m[1]) ? m[1] : "";
   }
   function getCardTitle(card){
@@ -471,10 +476,14 @@
     }
     result.innerHTML = "";
 
-    var allowedUID = {}, allowedTitle = {};
+    var allowedUID = {}, allowedTitle = {}, allowedTitleList = [];
     for(var i=0;i<matches.length;i++){
       if(matches[i].uid) allowedUID[matches[i].uid] = true;
-      if(matches[i].title) allowedTitle[up(matches[i].title)] = true;
+      if(matches[i].title){
+        var titleKey = up(matches[i].title);
+        allowedTitle[titleKey] = true;
+        allowedTitleList.push(titleKey);
+      }
     }
 
     var found = 0;
@@ -484,7 +493,16 @@
       var title = up(getCardTitle(card));
       var ok = false;
       if(uid && allowedUID[uid]) ok = true;
-      else if(!uid && title && allowedTitle[title]) ok = true;
+      if(!ok && title && allowedTitle[title]) ok = true;
+      if(!ok && title && allowedTitleList.length){
+        for(var t=0;t<allowedTitleList.length;t++){
+          var allowed = allowedTitleList[t];
+          if(title.indexOf(allowed) !== -1 || allowed.indexOf(title) !== -1){
+            ok = true;
+            break;
+          }
+        }
+      }
 
       if(ok){ result.appendChild(card); found++; }
     }
