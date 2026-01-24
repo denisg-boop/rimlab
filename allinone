@@ -445,14 +445,7 @@
     var href = link ? link.getAttribute("href") : "";
     if(!href) return "";
     var m = href.match(/\/tproduct\/\d+\-(\d+)/i);
-    if(m && m[1]) return m[1];
-    var m2 = href.match(/product(?:id|uid)?=([0-9]+)/i);
-    return (m2 && m2[1]) ? m2[1] : "";
-  }
-  function getCardHref(card){
-    if(!card) return "";
-    var link = card.querySelector(SETTINGS.CARD.linkSelector);
-    return link ? (link.getAttribute("href") || "") : "";
+    return (m && m[1]) ? m[1] : "";
   }
   function getCardTitle(card){
     if(!card) return "";
@@ -490,7 +483,7 @@
     for(var i=0;i<matches.length;i++){
       if(matches[i].uid) allowedUID[matches[i].uid] = true;
       if(matches[i].title){
-        var titleKey = key(matches[i].title);
+        var titleKey = up(matches[i].title);
         allowedTitle[titleKey] = true;
         allowedTitleList.push(titleKey);
       }
@@ -500,15 +493,9 @@
     for(var c=0;c<cards.length;c++){
       var card = cards[c];
       var uid = getCardUid(card);
-      var href = getCardHref(card);
       var title = key(getCardTitle(card));
       var ok = false;
       if(uid && allowedUID[uid]) ok = true;
-      if(!ok && href){
-        for(var uidKey in allowedUID){
-          if(href.indexOf(uidKey) !== -1){ ok = true; break; }
-        }
-      }
       if(!ok && title && allowedTitle[title]) ok = true;
       if(!ok && title && allowedTitleList.length){
         for(var t=0;t<allowedTitleList.length;t++){
