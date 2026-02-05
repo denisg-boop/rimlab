@@ -204,7 +204,7 @@
   */
   var CFG = {
     SHEET: {
-      SHEET_PUBHTML_URL: "[ВСТАВИТЬ МОЙ АКТУАЛЬНЫЙ URL pubhtml...]",
+      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT0ZixzswZCtCoiNseH_54kEKFADvyfYF7q8dvPp6R0CIkU-lS3SyS4KUuz_yhVr_eS9jUTX3N5LGff/pub?gid=1907352028&single=true&output=csv",
       CSV_URL: "",
       GID: "[gid=...]",
       COLUMNS: {
