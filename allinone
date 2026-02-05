@@ -204,9 +204,9 @@
   */
   var CFG = {
     SHEET: {
-      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSD_RlVif74yW6a16kwBb4OSqt4OLXPPIjehIxIFqRC9PvmKfTejpn61LOttkiT86Iv3A0bORAxrvwm/pubhtml?gid=693646388&single=true",
+      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT0ZixzswZCtCoiNseH_54kEKFADvyfYF7q8dvPp6R0CIkU-lS3SyS4KUuz_yhVr_eS9jUTX3N5LGff/pub?gid=1907352028&single=true&output=csv",
       CSV_URL: "",
-      GID: "693646388",
+      GID: "[gid=...]",
       COLUMNS: {
         UID: "Tilda UID",
         BRAND: "Brand",
@@ -413,26 +413,12 @@
     try{ localStorage.setItem(CFG.FILTER.STORAGE_KEY_CACHE, JSON.stringify({ ts: Date.now(), data: data })); }catch(e){}
   }
 
-  // Фолбэк: читаем кэш даже если TTL истёк (на случай временного сбоя сети/Google).
-  function loadStaleCache(){
-    if(!CFG.CACHE.ENABLE_LOCALSTORAGE) return null;
-    try{
-      var raw = localStorage.getItem(CFG.FILTER.STORAGE_KEY_CACHE);
-      if(!raw) return null;
-      var obj = JSON.parse(raw);
-      return (obj && obj.data) ? obj.data : null;
-    }catch(e){ return null; }
-  }
-
   function fetchData(){
     if(STATE.data && !CFG.CACHE.FORCE_REFRESH) return Promise.resolve(STATE.data);
     var cached = loadCache();
     if(cached){ STATE.data = cached; return Promise.resolve(cached); }
-
     var url = csvUrlFromSettings();
-    if(!url || url.indexOf("[ВСТАВИТЬ") !== -1){
-      return Promise.reject(new Error("Не задан рабочий URL таблицы в CFG.SHEET.SHEET_PUBHTML_URL или CFG.SHEET.CSV_URL"));
-    }
+    if(!url) return Promise.reject(new Error("Не задан URL таблицы"));
 
     return fetch(url, { cache: "no-store" })
       .then(function(res){ if(!res.ok) throw new Error("Ошибка загрузки CSV: " + res.status); return res.text(); })
@@ -442,15 +428,6 @@
         STATE.data = data;
         saveCache(data);
         return data;
-      })
-      .catch(function(err){
-        // Важно: если сеть недоступна, пытаемся использовать старый кэш, чтобы UI не ломался.
-        var stale = loadStaleCache();
-        if(stale){
-          STATE.data = stale;
-          return stale;
-        }
-        throw err;
       });
   }
 
@@ -726,7 +703,7 @@
         setupObserver();
       })
       .catch(function(err){
-        alert("Ошибка загрузки данных фильтра: " + err.message + "\nПроверьте URL таблицы (CFG.SHEET.*), доступность опубликованного CSV и internet на устройстве.");
+        alert("Ошибка загрузки данных фильтра: " + err.message);
       });
   }
 
