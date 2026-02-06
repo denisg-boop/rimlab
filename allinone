@@ -204,10 +204,9 @@
   */
   var CFG = {
     SHEET: {
-      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSD_RlVif74yW6a16kwBb4OSqt4OLXPPIjehIxIFqRC9PvmKfTejpn61LOttkiT86Iv3A0bORAxrvwm/pubhtml?gid=693646388&single=true",
+      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vT0ZixzswZCtCoiNseH_54kEKFADvyfYF7q8dvPp6R0CIkU-lS3SyS4KUuz_yhVr_eS9jUTX3N5LGff/pub?gid=1907352028&single=true&output=csv",
       CSV_URL: "",
-      GID: "693646388",
-      SHEET_ID: "", // можно оставить пустым: тогда возьмём из SHEET_PUBHTML_URL
+      GID: "[gid=...]",
       COLUMNS: {
         UID: "Tilda UID",
         BRAND: "Brand",
@@ -414,285 +413,21 @@
     try{ localStorage.setItem(CFG.FILTER.STORAGE_KEY_CACHE, JSON.stringify({ ts: Date.now(), data: data })); }catch(e){}
   }
 
-  // Фолбэк: читаем кэш даже если TTL истёк (на случай временного сбоя сети/Google).
-  function loadStaleCache(){
-    if(!CFG.CACHE.ENABLE_LOCALSTORAGE) return null;
-    try{
-      var raw = localStorage.getItem(CFG.FILTER.STORAGE_KEY_CACHE);
-      if(!raw) return null;
-      var obj = JSON.parse(raw);
-      return (obj && obj.data) ? obj.data : null;
-    }catch(e){ return null; }
-  }
-
-
-
-  function readAny(obj, keys){
-    if(!obj) return "";
-    for(var i=0;i<keys.length;i++){
-      var k = keys[i];
-      if(obj[k] != null && String(obj[k]).length) return String(obj[k]);
-    }
-    return "";
-  }
-
-  function extractCompatFromObj(prod){
-    var direct = readAny(prod, [
-      "Characteristics:Совместимость", "characteristics:совместимость", "Совместимость", "compatibility", "Compatibility", "compat"
-    ]);
-    if(direct) return direct;
-
-    var chars = prod.characteristics || prod.Characteristics || prod.features || prod.params || null;
-    if(chars && typeof chars === "object"){
-      if(Object.prototype.toString.call(chars) === "[object Array]"){
-        for(var i=0;i<chars.length;i++){
-          var row = chars[i] || {};
-          var n = up(readAny(row, ["name","title","key","label"]));
-          var v = readAny(row, ["value","val","text"]);
-          if(n.indexOf("СОВМЕСТИМОСТ") !== -1 || n.indexOf("COMPAT") !== -1) return v;
-        }
-      }else{
-        var val = readAny(chars, ["Совместимость", "совместимость", "Compatibility", "compatibility"]);
-        if(val) return val;
-      }
-    }
-    return "";
-  }
-
-  function productToRow(prod){
-    var uid = readAny(prod, ["uid","tilda_uid","Tilda UID","id","productUid","productuid"]);
-    var title = readAny(prod, ["title","name","Title"]);
-    var brand = readAny(prod, ["Brand","brand","Марка","mark"]);
-    var compat = extractCompatFromObj(prod);
-    if(!brand || !compat) return null;
-    return { uid: uid, title: title, brand: brand, compat: compat };
-  }
-
-  // Радикально другой источник: берём данные прямо из уже загруженного каталога Tilda (без Google fetch).
-  function collectTildaProducts(){
-    var buckets = [];
-    var w = window;
-    var candidates = [
-      w.t_store, w.tcart, w.tildaStore, w.tildaCatalog, w.t_store_data, w.t_store_products,
-      w.t_store__products, w.t754__store, w.t156__store, w.t_storeparts
-    ];
-    for(var i=0;i<candidates.length;i++) if(candidates[i]) buckets.push(candidates[i]);
-
-    // Плюс проходим глобальные переменные — часто Tilda кладёт данные в project-scoped объекты.
-    var keys = Object.keys(window);
-    for(i=0;i<keys.length;i++){
-      var k = keys[i];
-      if(k.indexOf("_tilda") !== -1 || k.indexOf("store") !== -1 || k.indexOf("catalog") !== -1 || k.indexOf("product") !== -1){
-        try{ if(window[k]) buckets.push(window[k]); }catch(e){}
-      }
-    }
-
-    var rows = [];
-    var seen = {};
-
-    function pushProd(obj){
-      var row = productToRow(obj);
-      if(!row) return;
-      var sig = up(row.brand) + "|" + up(row.compat) + "|" + row.uid + "|" + safeKey(row.title);
-      if(seen[sig]) return;
-      seen[sig] = true;
-      rows.push(row);
-    }
-
-    function walk(node, depth){
-      if(!node || depth > 3) return;
-      var t = Object.prototype.toString.call(node);
-      if(t === "[object Array]"){
-        for(var a=0;a<node.length;a++){
-          var it = node[a];
-          if(it && typeof it === "object"){
-            pushProd(it);
-            walk(it, depth + 1);
-          }
-        }
-        return;
-      }
-      if(typeof node === "object"){
-        pushProd(node);
-        var ks = Object.keys(node);
-        for(var j=0;j<ks.length;j++){
-          var val;
-          try{ val = node[ks[j]]; }catch(e){ continue; }
-          if(val && typeof val === "object") walk(val, depth + 1);
-        }
-      }
-    }
-
-    for(i=0;i<buckets.length;i++) walk(buckets[i], 0);
-    return rows;
-  }
-
-  function buildDataFromRuntimeRows(rows){
-    var tree = {};
-    var mapping = {};
-    for(var i=0;i<rows.length;i++){
-      var brand = up(rows[i].brand);
-      var compat = norm(rows[i].compat);
-      var uid = norm(rows[i].uid);
-      var title = norm(rows[i].title);
-      var pairs = parseCompat(compat);
-      if(!brand || !pairs.length) continue;
-
-      if(!tree[brand]) tree[brand] = {};
-      if(!mapping[brand]) mapping[brand] = {};
-
-      for(var p=0;p<pairs.length;p++){
-        var series = pairs[p].series;
-        var body = pairs[p].body || CFG.FILTER.BODY_EMPTY_LABEL;
-        if(!tree[brand][series]) tree[brand][series] = [];
-        if(tree[brand][series].indexOf(body) === -1) tree[brand][series].push(body);
-
-        if(!mapping[brand][series]) mapping[brand][series] = {};
-        if(!mapping[brand][series][body]) mapping[brand][series][body] = [];
-        mapping[brand][series][body].push({ uid: uid, title: title, titleKey: safeKey(title) });
-      }
-    }
-
-    var brands = Object.keys(tree).sort();
-    for(var b=0;b<brands.length;b++){
-      var seriesArr = Object.keys(tree[brands[b]]).sort();
-      for(var s=0;s<seriesArr.length;s++) tree[brands[b]][seriesArr[s]].sort();
-    }
-    return { tree: tree, mapping: mapping, brands: brands };
-  }
-
-  function loadFromTildaRuntime(){
-    var rows = collectTildaProducts();
-    if(!rows || !rows.length) return null;
-    var data = buildDataFromRuntimeRows(rows);
-    if(!data.brands || !data.brands.length) return null;
-    log("runtime data loaded", data.brands.length, "brands");
-    return data;
-  }
-
-  // Получаем spreadsheetId (нужен для JSONP-фолбэка gviz).
-  function getSheetId(){
-    var explicit = norm(CFG.SHEET.SHEET_ID);
-    if(explicit) return explicit;
-    var raw = norm(CFG.SHEET.SHEET_PUBHTML_URL);
-    if(!raw) return "";
-    var m = raw.match(/\/spreadsheets\/d\/e\/([^\/\?]+)/i); // новый формат /d/e/<id>
-    if(m && m[1]) return m[1];
-    m = raw.match(/\/spreadsheets\/d\/([^\/\?]+)/i); // старый формат /d/<id>
-    return (m && m[1]) ? m[1] : "";
-  }
-
-  function gvizJsonpUrl(){
-    var sid = getSheetId();
-    var gid = norm(CFG.SHEET.GID).replace("gid=", "");
-    if(!sid || !gid) return "";
-    // tqx=responseHandler:<fn>;out:json => ответ выполняется как JS, минуя CORS fetch.
-    return "https://docs.google.com/spreadsheets/d/e/" + encodeURIComponent(sid) + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&headers=1&tqx=responseHandler:__TCF_GVIZ_CB;out:json";
-  }
-
-  function rowsFromGvizResponse(resp){
-    var table = resp && resp.table ? resp.table : null;
-    if(!table || !table.cols || !table.rows) throw new Error("GVIZ: некорректный ответ");
-
-    var rows = [];
-    var headers = [];
-    var i, j;
-    for(i=0;i<table.cols.length;i++){
-      var col = table.cols[i] || {};
-      headers.push(norm(col.label || col.id || ("col" + i)));
-    }
-    rows.push(headers);
-
-    for(i=0;i<table.rows.length;i++){
-      var r = table.rows[i] || {};
-      var cells = r.c || [];
-      var outRow = [];
-      for(j=0;j<headers.length;j++){
-        var cell = cells[j];
-        var val = "";
-        if(cell){
-          if(cell.f != null && String(cell.f).length) val = String(cell.f);
-          else if(cell.v != null) val = String(cell.v);
-        }
-        outRow.push(val);
-      }
-      rows.push(outRow);
-    }
-    return rows;
-  }
-
-  function fetchViaGvizJsonp(){
-    return new Promise(function(resolve, reject){
-      var url = gvizJsonpUrl();
-      if(!url) return reject(new Error("GVIZ URL пустой"));
-
-      var cbName = "__TCF_GVIZ_CB";
-      var timeoutId = 0;
-      var script = document.createElement("script");
-
-      function cleanup(){
-        if(timeoutId) window.clearTimeout(timeoutId);
-        try{ delete window[cbName]; }catch(e){ window[cbName] = null; }
-        if(script && script.parentNode) script.parentNode.removeChild(script);
-      }
-
-      window[cbName] = function(resp){
-        try{
-          var rows = rowsFromGvizResponse(resp);
-          cleanup();
-          resolve(rows);
-        }catch(e){
-          cleanup();
-          reject(e);
-        }
-      };
-
-      timeoutId = window.setTimeout(function(){ cleanup(); reject(new Error("GVIZ timeout")); }, 10000);
-      script.src = url;
-      script.async = true;
-      script.onerror = function(){ cleanup(); reject(new Error("GVIZ script error")); };
-      (document.head || document.body).appendChild(script);
-    });
-  }
-
   function fetchData(){
     if(STATE.data && !CFG.CACHE.FORCE_REFRESH) return Promise.resolve(STATE.data);
     var cached = loadCache();
     if(cached){ STATE.data = cached; return Promise.resolve(cached); }
-
-    // 0) Новый приоритет: пробуем взять данные прямо из каталога Tilda (без сети).
-    var runtimeData = loadFromTildaRuntime();
-    if(runtimeData){ STATE.data = runtimeData; saveCache(runtimeData); return Promise.resolve(runtimeData); }
-
     var url = csvUrlFromSettings();
-    if(!url || url.indexOf("[ВСТАВИТЬ") !== -1){
-      return Promise.reject(new Error("Не задан рабочий URL таблицы в CFG.SHEET.SHEET_PUBHTML_URL или CFG.SHEET.CSV_URL"));
-    }
+    if(!url) return Promise.reject(new Error("Не задан URL таблицы"));
 
-    function finalize(rows){
-      var data = buildDataIndex(rows);
-      STATE.data = data;
-      saveCache(data);
-      return data;
-    }
-
-    // 1) fetch CSV.
     return fetch(url, { cache: "no-store" })
       .then(function(res){ if(!res.ok) throw new Error("Ошибка загрузки CSV: " + res.status); return res.text(); })
-      .then(function(text){ return finalize(parseCsv(text)); })
-      .catch(function(errFetch){
-        // 2) gviz JSONP.
-        return fetchViaGvizJsonp()
-          .then(function(rows){ return finalize(rows); })
-          .catch(function(errGviz){
-            // 3) На случай поздней инициализации Tilda пробуем runtime ещё раз.
-            var runtimeLate = loadFromTildaRuntime();
-            if(runtimeLate){ STATE.data = runtimeLate; saveCache(runtimeLate); return runtimeLate; }
-            // 4) Старый кэш.
-            var stale = loadStaleCache();
-            if(stale){ STATE.data = stale; return stale; }
-            throw new Error("Не удалось загрузить таблицу: runtime/fetch/gviz/cache. fetch=" + errFetch.message + "; gviz=" + errGviz.message);
-          });
+      .then(function(text){
+        var rows = parseCsv(text);
+        var data = buildDataIndex(rows);
+        STATE.data = data;
+        saveCache(data);
+        return data;
       });
   }
 
@@ -968,7 +703,7 @@
         setupObserver();
       })
       .catch(function(err){
-        alert("Ошибка загрузки данных фильтра: " + err.message + "\nПроверьте: 1) CFG.SHEET.SHEET_PUBHTML_URL/CSV_URL/GID/SHEET_ID, 2) опубликована ли таблица, 3) нет ли блокировок сети/VPN.");
+        alert("Ошибка загрузки данных фильтра: " + err.message);
       });
   }
 
@@ -982,6 +717,4 @@
 2) Карточки не находятся: проверьте CFG.STORE.GRID_SELECTOR и CFG.STORE.CARD_SELECTOR по DOM вашего ST320N.
 3) UID не извлекается: проверьте CFG.CARD.LINK_SELECTOR и CFG.CARD.UID_REGEX.
 4) Нет совпадений при очевидно правильном выборе: проверьте формат "Characteristics:Совместимость" (строго через ";").
-5) Видите старые данные: временно включите CFG.CACHE.FORCE_REFRESH = true.
-6) Если "failed to fetch": фильтр теперь сначала читает данные из каталога Tilda; если брендов 0 — включите CFG.DBG=true и пришлите логи.
-7) Для JSONP-фолбэка можно явно указать CFG.SHEET.SHEET_ID (из URL /d/e/<ID>). -->
+5) Видите старые данные: временно включите CFG.CACHE.FORCE_REFRESH = true. -->
