@@ -191,165 +191,522 @@
 (function(){
   "use strict";
 
-  var SETTINGS = {
-    SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSD_RlVif74yW6a16kwBb4OSqt4OLXPPIjehIxIFqRC9PvmKfTejpn61LOttkiT86Iv3A0bORAxrvwm/pubhtml?gid=693646388&single=true",
+  /*
+   ======================================================================
+   НАСТРОЙКИ (можно безопасно менять)
+   ======================================================================
+   1) Вставьте ваш рабочий URL Google Sheets (pubhtml или сразу CSV).
+   2) Если не находит карточки — правьте STORE.SELECTORS.
+   3) Если UID не извлекается — правьте CARD.LINK_SELECTOR и UID_REGEX.
+   4) Если не заполняются списки — проверьте имена колонок CSV в SHEET.COLUMNS.
+   5) Если появляются "дырки" — это решено через отдельный контейнер результатов,
+      где карточки показываются клонами плотной сеткой (исходная сетка скрывается).
+  */
+  var CFG = {
+    SHEET: {
+      SHEET_PUBHTML_URL: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSD_RlVif74yW6a16kwBb4OSqt4OLXPPIjehIxIFqRC9PvmKfTejpn61LOttkiT86Iv3A0bORAxrvwm/pubhtml?gid=693646388&single=true",
+      CSV_URL: "",
+      GID: "693646388",
+      SHEET_ID: "", // можно оставить пустым: тогда возьмём из SHEET_PUBHTML_URL
+      COLUMNS: {
+        UID: "Tilda UID",
+        BRAND: "Brand",
+        COMPAT: "Characteristics:Совместимость",
+        TITLE: "Title"
+      }
+    },
     STORE: {
-      gridSelector: ".js-store-grid-cont, .t-store__grid-cont, .t-store__grid, .js-store-grid",
-      cardSelector: ".js-product, .t-store__card, .js-store-prod, .t-card, .t-store__product"
+      ROOT_SELECTOR: ".js-store,.t-store,.t-store__container,.uc-store",
+      GRID_SELECTOR: ".js-store-grid-cont, .t-store__grid-cont, .t-store__grid, .js-store-grid",
+      CARD_SELECTOR: ".js-product, .t-store__card, .js-store-prod, .t-card, .t-store__product",
+      SHOW_MORE_SELECTOR: ".t-store__show-more, .js-store-partsload-more, .t-store__load-more-btn, button[data-show-more]"
     },
     CARD: {
-      linkSelector: "a[href*='/tproduct/']",
-      titleSelector: ".t-store__card__title, .t-name, .js-store-prod-name, .t-card__title"
+      LINK_SELECTOR: "a[href*='/tproduct/']",
+      TITLE_SELECTOR: ".t-store__card__title, .t-name, .js-store-prod-name, .t-card__title",
+      UID_REGEX: /\/tproduct\/[\w\-]+-(\d+)/i
     },
-    CACHE_TTL_MS: 2 * 60 * 1000,
-    FORCE_REFRESH: false,
+    FILTER: {
+      BODY_EMPTY_LABEL: "—",
+      NO_RESULTS_TEXT: "Нет подходящих дисков",
+      STORAGE_KEY_SELECTION: "tcf_selection_v2",
+      STORAGE_KEY_CACHE: "tcf_sheet_cache_v2"
+    },
+    CACHE: {
+      ENABLE_LOCALSTORAGE: true,
+      TTL_MS: 2 * 60 * 1000,
+      FORCE_REFRESH: true
+    },
     DBG: false
   };
 
-  function norm(s){ return (s == null ? "" : String(s)).replace(/\u00A0/g," ").trim(); }
-  function up(s){ return norm(s).toUpperCase().replace(/\s+/g," ").trim(); }
-  function key(s){ return up(s).replace(/[^A-Z0-9А-ЯЁ]+/g, " ").replace(/\s+/g, " ").trim(); }
+  function log(){ if(!CFG.DBG || !window.console || !console.log) return; console.log.apply(console, ["[TCF]"] .concat(Array.prototype.slice.call(arguments))); }
+  function norm(v){ return (v == null ? "" : String(v)).replace(/ /g, " ").replace(/\s+/g, " ").trim(); }
+  function up(v){ return norm(v).toUpperCase(); }
+  function safeKey(v){ return up(v).replace(/[^A-Z0-9А-ЯЁ]+/g, " ").replace(/\s+/g, " ").trim(); }
 
-  function pubhtmlToCsv(url){
-    try{
-      var u = new URL(url);
-      var gid = u.searchParams.get("gid") || "";
-      u.pathname = u.pathname.replace(/\/pubhtml$/i, "/pub");
-      u.search = "";
-      u.searchParams.set("output","csv");
-      if(gid) u.searchParams.set("gid", gid);
-      return u.toString();
-    }catch(e){ return url; }
+  var STATE = {
+    data: null,
+    activeFilter: null,
+    observer: null,
+    debounceTimer: 0
+  };
+
+  function firstBySelectors(selectorList, root){
+    var base = root || document;
+    var arr = selectorList.split(",");
+    for(var i=0;i<arr.length;i++){
+      var sel = norm(arr[i]);
+      if(!sel) continue;
+      var el = base.querySelector(sel);
+      if(el) return el;
+    }
+    return null;
   }
 
-  function csvParse(text){
-    var rows = [], row = [], cur = "", inQ = false;
+  function csvUrlFromSettings(){
+    if(norm(CFG.SHEET.CSV_URL)) return CFG.SHEET.CSV_URL;
+    var raw = norm(CFG.SHEET.SHEET_PUBHTML_URL);
+    if(!raw) return "";
+    try{
+      var u = new URL(raw);
+      var gid = norm(CFG.SHEET.GID).replace("gid=", "") || u.searchParams.get("gid") || "";
+      u.pathname = u.pathname.replace(/\/pubhtml$/i, "/pub");
+      u.search = "";
+      u.searchParams.set("output", "csv");
+      if(gid) u.searchParams.set("gid", gid);
+      return u.toString();
+    }catch(e){ return raw; }
+  }
+
+  /*
+    Надежный CSV-парсер без внешних библиотек.
+    Поддержка:
+    - запятые в кавычках
+    - переносы строк в кавычках
+    - экранирование двойной кавычки "" внутри поля
+  */
+  function parseCsv(text){
+    var rows = [];
+    var row = [];
+    var cur = "";
+    var inQuotes = false;
     for(var i=0;i<text.length;i++){
-      var ch = text[i], next = text[i+1];
+      var ch = text.charAt(i);
+      var next = text.charAt(i+1);
       if(ch === '"'){
-        if(inQ && next === '"'){ cur+='"'; i++; }
-        else inQ = !inQ;
-        continue;
-      }
-      if(!inQ && ch === ","){ row.push(cur); cur=""; continue; }
-      if(!inQ && (ch === "\n" || ch === "\r")){
+        if(inQuotes && next === '"'){ cur += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      }else if(ch === ',' && !inQuotes){
+        row.push(cur); cur = "";
+      }else if((ch === "\n" || ch === "\r") && !inQuotes){
         if(ch === "\r" && next === "\n") i++;
-        row.push(cur); rows.push(row); row=[]; cur=""; continue;
+        row.push(cur); rows.push(row);
+        row = []; cur = "";
+      }else{
+        cur += ch;
       }
-      cur += ch;
     }
     if(cur.length || row.length){ row.push(cur); rows.push(row); }
     return rows;
   }
 
-  function findCol(headers, name){
-    var target = up(name);
-    for(var i=0;i<headers.length;i++) if(up(headers[i]) === target) return i;
-    for(var j=0;j<headers.length;j++) if(up(headers[j]).indexOf(target) >= 0) return j;
+  function findColumnIndex(headers, expected){
+    var target = up(expected);
+    var i;
+    for(i=0;i<headers.length;i++) if(up(headers[i]) === target) return i;
+    for(i=0;i<headers.length;i++) if(up(headers[i]).indexOf(target) !== -1) return i;
     return -1;
   }
 
-  function parseCompat(raw){
-    var s = norm(raw);
-    if(!s) return [];
-    var parts = s.split(";");
+  /*
+    Разбор сегмента "Серия КУЗОВ".
+    Пример: "X5 G05" => series="X5", body="G05".
+    Если кузов в сегменте отсутствует, body = BODY_EMPTY_LABEL.
+  */
+  function splitSeriesAndBody(segment){
+    var clean = norm(segment);
+    if(!clean) return null;
+    var parts = clean.split(" ");
+    if(parts.length === 1){
+      return { series: up(parts[0]), body: CFG.FILTER.BODY_EMPTY_LABEL };
+    }
+    var last = up(parts[parts.length - 1]);
+    var bodyLike = /(^[A-ZА-Я]{1,4}\d{1,4}$)|(^\d{2,4}$)|(^[A-ZА-Я]\d[A-ZА-Я0-9]*$)/i.test(last);
+    if(bodyLike){
+      return { series: up(parts.slice(0, parts.length - 1).join(" ")), body: last };
+    }
+    return { series: up(clean), body: CFG.FILTER.BODY_EMPTY_LABEL };
+  }
+
+  function parseCompat(rawCompat){
+    var raw = norm(rawCompat);
+    if(!raw) return [];
+    var segments = raw.split(";");
     var out = [];
-    for(var i=0;i<parts.length;i++){
-      var seg = norm(parts[i]).replace(/\s+/g," ");
-      if(!seg) continue;
-      var tokens = seg.split(" ");
-      if(tokens.length >= 2){
-        var body = up(tokens[tokens.length-1]);
-        var series = up(tokens.slice(0,-1).join(" "));
-        out.push({ series: series, body: body });
-      }else{
-        out.push({ series: up(seg), body: "—" });
-      }
+    for(var i=0;i<segments.length;i++){
+      var item = splitSeriesAndBody(segments[i]);
+      if(item && item.series){ out.push(item); }
     }
     return out;
   }
 
-  function buildTree(rows){
+  function buildDataIndex(rows){
     var headers = rows[0] || [];
-    var iBrand = findCol(headers, "Brand");
-    var iComp  = findCol(headers, "Characteristics:Совместимость");
-    var iUid   = findCol(headers, "Tilda UID");
-    var iTitle = findCol(headers, "Title");
-    if(iBrand < 0 || iComp < 0) throw new Error("CSV: нет колонок Brand/Characteristics:Совместимость");
+    var idxBrand = findColumnIndex(headers, CFG.SHEET.COLUMNS.BRAND);
+    var idxCompat = findColumnIndex(headers, CFG.SHEET.COLUMNS.COMPAT);
+    var idxUid = findColumnIndex(headers, CFG.SHEET.COLUMNS.UID);
+    var idxTitle = findColumnIndex(headers, CFG.SHEET.COLUMNS.TITLE);
+    if(idxBrand < 0 || idxCompat < 0){ throw new Error("В CSV не найдены обязательные колонки Brand / Compatibility"); }
 
-    var tree = {}, index = {};
+    var tree = {};
+    var mapping = {};
+
     for(var r=1;r<rows.length;r++){
       var row = rows[r] || [];
-      var brand = up(row[iBrand]);
-      var comp  = norm(row[iComp]);
-      var uid   = norm(row[iUid]);
-      var title = norm(row[iTitle]);
-      if(!brand || !comp) continue;
+      var brand = up(row[idxBrand]);
+      var compat = norm(row[idxCompat]);
+      var uid = idxUid >= 0 ? norm(row[idxUid]) : "";
+      var title = idxTitle >= 0 ? norm(row[idxTitle]) : "";
+      if(!brand || !compat) continue;
 
-      var pairs = parseCompat(comp);
+      var pairs = parseCompat(compat);
       if(!pairs.length) continue;
 
       if(!tree[brand]) tree[brand] = {};
-      if(!index[brand]) index[brand] = {};
+      if(!mapping[brand]) mapping[brand] = {};
 
       for(var p=0;p<pairs.length;p++){
         var series = pairs[p].series;
-        var body = pairs[p].body || "—";
+        var body = pairs[p].body || CFG.FILTER.BODY_EMPTY_LABEL;
 
         if(!tree[brand][series]) tree[brand][series] = [];
         if(tree[brand][series].indexOf(body) === -1) tree[brand][series].push(body);
 
-        if(!index[brand][series]) index[brand][series] = {};
-        if(!index[brand][series][body]) index[brand][series][body] = [];
-        if(uid) index[brand][series][body].push({ uid: uid, title: title });
-        else if(title) index[brand][series][body].push({ uid: "", title: title });
+        if(!mapping[brand][series]) mapping[brand][series] = {};
+        if(!mapping[brand][series][body]) mapping[brand][series][body] = [];
+        mapping[brand][series][body].push({ uid: uid, title: title, titleKey: safeKey(title) });
       }
     }
+
     var brands = Object.keys(tree).sort();
     for(var b=0;b<brands.length;b++){
-      var brandKey = brands[b];
-      var seriesKeys = Object.keys(tree[brandKey]).sort();
-      for(var s=0;s<seriesKeys.length;s++){
-        tree[brandKey][seriesKeys[s]].sort();
-      }
+      var ser = Object.keys(tree[brands[b]]).sort();
+      for(var s=0;s<ser.length;s++) tree[brands[b]][ser[s]].sort();
     }
-    return { tree: tree, index: index, brands: brands };
+
+    return { tree: tree, mapping: mapping, brands: brands };
   }
 
-  var CACHE_KEY = "tcf_cache_v1:" + SETTINGS.SHEET_PUBHTML_URL;
-  function cacheGet(){
+  function loadCache(){
+    if(!CFG.CACHE.ENABLE_LOCALSTORAGE || CFG.CACHE.FORCE_REFRESH) return null;
     try{
-      var raw = localStorage.getItem(CACHE_KEY);
+      var raw = localStorage.getItem(CFG.FILTER.STORAGE_KEY_CACHE);
       if(!raw) return null;
       var obj = JSON.parse(raw);
-      if(Date.now() - obj.ts > SETTINGS.CACHE_TTL_MS) return null;
+      if(!obj || !obj.ts || !obj.data) return null;
+      if(Date.now() - obj.ts > CFG.CACHE.TTL_MS) return null;
       return obj.data;
     }catch(e){ return null; }
   }
-  function cacheSet(data){
-    try{ localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: data })); }catch(e){}
+  function saveCache(data){
+    if(!CFG.CACHE.ENABLE_LOCALSTORAGE) return;
+    try{ localStorage.setItem(CFG.FILTER.STORAGE_KEY_CACHE, JSON.stringify({ ts: Date.now(), data: data })); }catch(e){}
   }
 
-  function loadSheet(){
-    if(window.__TCF_DATA && !SETTINGS.FORCE_REFRESH) return Promise.resolve(window.__TCF_DATA);
-    var cached = cacheGet();
-    if(cached && !SETTINGS.FORCE_REFRESH){ window.__TCF_DATA = cached; return Promise.resolve(cached); }
-    var csvUrl = pubhtmlToCsv(SETTINGS.SHEET_PUBHTML_URL);
-    return fetch(csvUrl, { cache: "no-store" })
-      .then(function(r){ if(!r.ok) throw new Error("CSV fetch failed: " + r.status); return r.text(); })
-      .then(function(text){ var data = buildTree(csvParse(text)); window.__TCF_DATA = data; cacheSet(data); return data; });
+  // Фолбэк: читаем кэш даже если TTL истёк (на случай временного сбоя сети/Google).
+  function loadStaleCache(){
+    if(!CFG.CACHE.ENABLE_LOCALSTORAGE) return null;
+    try{
+      var raw = localStorage.getItem(CFG.FILTER.STORAGE_KEY_CACHE);
+      if(!raw) return null;
+      var obj = JSON.parse(raw);
+      return (obj && obj.data) ? obj.data : null;
+    }catch(e){ return null; }
   }
 
-  function fillSelect(select, items, placeholder){
+
+
+  function readAny(obj, keys){
+    if(!obj) return "";
+    for(var i=0;i<keys.length;i++){
+      var k = keys[i];
+      if(obj[k] != null && String(obj[k]).length) return String(obj[k]);
+    }
+    return "";
+  }
+
+  function extractCompatFromObj(prod){
+    var direct = readAny(prod, [
+      "Characteristics:Совместимость", "characteristics:совместимость", "Совместимость", "compatibility", "Compatibility", "compat"
+    ]);
+    if(direct) return direct;
+
+    var chars = prod.characteristics || prod.Characteristics || prod.features || prod.params || null;
+    if(chars && typeof chars === "object"){
+      if(Object.prototype.toString.call(chars) === "[object Array]"){
+        for(var i=0;i<chars.length;i++){
+          var row = chars[i] || {};
+          var n = up(readAny(row, ["name","title","key","label"]));
+          var v = readAny(row, ["value","val","text"]);
+          if(n.indexOf("СОВМЕСТИМОСТ") !== -1 || n.indexOf("COMPAT") !== -1) return v;
+        }
+      }else{
+        var val = readAny(chars, ["Совместимость", "совместимость", "Compatibility", "compatibility"]);
+        if(val) return val;
+      }
+    }
+    return "";
+  }
+
+  function productToRow(prod){
+    var uid = readAny(prod, ["uid","tilda_uid","Tilda UID","id","productUid","productuid"]);
+    var title = readAny(prod, ["title","name","Title"]);
+    var brand = readAny(prod, ["Brand","brand","Марка","mark"]);
+    var compat = extractCompatFromObj(prod);
+    if(!brand || !compat) return null;
+    return { uid: uid, title: title, brand: brand, compat: compat };
+  }
+
+  // Радикально другой источник: берём данные прямо из уже загруженного каталога Tilda (без Google fetch).
+  function collectTildaProducts(){
+    var buckets = [];
+    var w = window;
+    var candidates = [
+      w.t_store, w.tcart, w.tildaStore, w.tildaCatalog, w.t_store_data, w.t_store_products,
+      w.t_store__products, w.t754__store, w.t156__store, w.t_storeparts
+    ];
+    for(var i=0;i<candidates.length;i++) if(candidates[i]) buckets.push(candidates[i]);
+
+    // Плюс проходим глобальные переменные — часто Tilda кладёт данные в project-scoped объекты.
+    var keys = Object.keys(window);
+    for(i=0;i<keys.length;i++){
+      var k = keys[i];
+      if(k.indexOf("_tilda") !== -1 || k.indexOf("store") !== -1 || k.indexOf("catalog") !== -1 || k.indexOf("product") !== -1){
+        try{ if(window[k]) buckets.push(window[k]); }catch(e){}
+      }
+    }
+
+    var rows = [];
+    var seen = {};
+
+    function pushProd(obj){
+      var row = productToRow(obj);
+      if(!row) return;
+      var sig = up(row.brand) + "|" + up(row.compat) + "|" + row.uid + "|" + safeKey(row.title);
+      if(seen[sig]) return;
+      seen[sig] = true;
+      rows.push(row);
+    }
+
+    function walk(node, depth){
+      if(!node || depth > 3) return;
+      var t = Object.prototype.toString.call(node);
+      if(t === "[object Array]"){
+        for(var a=0;a<node.length;a++){
+          var it = node[a];
+          if(it && typeof it === "object"){
+            pushProd(it);
+            walk(it, depth + 1);
+          }
+        }
+        return;
+      }
+      if(typeof node === "object"){
+        pushProd(node);
+        var ks = Object.keys(node);
+        for(var j=0;j<ks.length;j++){
+          var val;
+          try{ val = node[ks[j]]; }catch(e){ continue; }
+          if(val && typeof val === "object") walk(val, depth + 1);
+        }
+      }
+    }
+
+    for(i=0;i<buckets.length;i++) walk(buckets[i], 0);
+    return rows;
+  }
+
+  function buildDataFromRuntimeRows(rows){
+    var tree = {};
+    var mapping = {};
+    for(var i=0;i<rows.length;i++){
+      var brand = up(rows[i].brand);
+      var compat = norm(rows[i].compat);
+      var uid = norm(rows[i].uid);
+      var title = norm(rows[i].title);
+      var pairs = parseCompat(compat);
+      if(!brand || !pairs.length) continue;
+
+      if(!tree[brand]) tree[brand] = {};
+      if(!mapping[brand]) mapping[brand] = {};
+
+      for(var p=0;p<pairs.length;p++){
+        var series = pairs[p].series;
+        var body = pairs[p].body || CFG.FILTER.BODY_EMPTY_LABEL;
+        if(!tree[brand][series]) tree[brand][series] = [];
+        if(tree[brand][series].indexOf(body) === -1) tree[brand][series].push(body);
+
+        if(!mapping[brand][series]) mapping[brand][series] = {};
+        if(!mapping[brand][series][body]) mapping[brand][series][body] = [];
+        mapping[brand][series][body].push({ uid: uid, title: title, titleKey: safeKey(title) });
+      }
+    }
+
+    var brands = Object.keys(tree).sort();
+    for(var b=0;b<brands.length;b++){
+      var seriesArr = Object.keys(tree[brands[b]]).sort();
+      for(var s=0;s<seriesArr.length;s++) tree[brands[b]][seriesArr[s]].sort();
+    }
+    return { tree: tree, mapping: mapping, brands: brands };
+  }
+
+  function loadFromTildaRuntime(){
+    var rows = collectTildaProducts();
+    if(!rows || !rows.length) return null;
+    var data = buildDataFromRuntimeRows(rows);
+    if(!data.brands || !data.brands.length) return null;
+    log("runtime data loaded", data.brands.length, "brands");
+    return data;
+  }
+
+  // Получаем spreadsheetId (нужен для JSONP-фолбэка gviz).
+  function getSheetId(){
+    var explicit = norm(CFG.SHEET.SHEET_ID);
+    if(explicit) return explicit;
+    var raw = norm(CFG.SHEET.SHEET_PUBHTML_URL);
+    if(!raw) return "";
+    var m = raw.match(/\/spreadsheets\/d\/e\/([^\/\?]+)/i); // новый формат /d/e/<id>
+    if(m && m[1]) return m[1];
+    m = raw.match(/\/spreadsheets\/d\/([^\/\?]+)/i); // старый формат /d/<id>
+    return (m && m[1]) ? m[1] : "";
+  }
+
+  function gvizJsonpUrl(){
+    var sid = getSheetId();
+    var gid = norm(CFG.SHEET.GID).replace("gid=", "");
+    if(!sid || !gid) return "";
+    // tqx=responseHandler:<fn>;out:json => ответ выполняется как JS, минуя CORS fetch.
+    return "https://docs.google.com/spreadsheets/d/e/" + encodeURIComponent(sid) + "/gviz/tq?gid=" + encodeURIComponent(gid) + "&headers=1&tqx=responseHandler:__TCF_GVIZ_CB;out:json";
+  }
+
+  function rowsFromGvizResponse(resp){
+    var table = resp && resp.table ? resp.table : null;
+    if(!table || !table.cols || !table.rows) throw new Error("GVIZ: некорректный ответ");
+
+    var rows = [];
+    var headers = [];
+    var i, j;
+    for(i=0;i<table.cols.length;i++){
+      var col = table.cols[i] || {};
+      headers.push(norm(col.label || col.id || ("col" + i)));
+    }
+    rows.push(headers);
+
+    for(i=0;i<table.rows.length;i++){
+      var r = table.rows[i] || {};
+      var cells = r.c || [];
+      var outRow = [];
+      for(j=0;j<headers.length;j++){
+        var cell = cells[j];
+        var val = "";
+        if(cell){
+          if(cell.f != null && String(cell.f).length) val = String(cell.f);
+          else if(cell.v != null) val = String(cell.v);
+        }
+        outRow.push(val);
+      }
+      rows.push(outRow);
+    }
+    return rows;
+  }
+
+  function fetchViaGvizJsonp(){
+    return new Promise(function(resolve, reject){
+      var url = gvizJsonpUrl();
+      if(!url) return reject(new Error("GVIZ URL пустой"));
+
+      var cbName = "__TCF_GVIZ_CB";
+      var timeoutId = 0;
+      var script = document.createElement("script");
+
+      function cleanup(){
+        if(timeoutId) window.clearTimeout(timeoutId);
+        try{ delete window[cbName]; }catch(e){ window[cbName] = null; }
+        if(script && script.parentNode) script.parentNode.removeChild(script);
+      }
+
+      window[cbName] = function(resp){
+        try{
+          var rows = rowsFromGvizResponse(resp);
+          cleanup();
+          resolve(rows);
+        }catch(e){
+          cleanup();
+          reject(e);
+        }
+      };
+
+      timeoutId = window.setTimeout(function(){ cleanup(); reject(new Error("GVIZ timeout")); }, 10000);
+      script.src = url;
+      script.async = true;
+      script.onerror = function(){ cleanup(); reject(new Error("GVIZ script error")); };
+      (document.head || document.body).appendChild(script);
+    });
+  }
+
+  function fetchData(){
+    if(STATE.data && !CFG.CACHE.FORCE_REFRESH) return Promise.resolve(STATE.data);
+    var cached = loadCache();
+    if(cached){ STATE.data = cached; return Promise.resolve(cached); }
+
+    // 0) Новый приоритет: пробуем взять данные прямо из каталога Tilda (без сети).
+    var runtimeData = loadFromTildaRuntime();
+    if(runtimeData){ STATE.data = runtimeData; saveCache(runtimeData); return Promise.resolve(runtimeData); }
+
+    var url = csvUrlFromSettings();
+    if(!url || url.indexOf("[ВСТАВИТЬ") !== -1){
+      return Promise.reject(new Error("Не задан рабочий URL таблицы в CFG.SHEET.SHEET_PUBHTML_URL или CFG.SHEET.CSV_URL"));
+    }
+
+    function finalize(rows){
+      var data = buildDataIndex(rows);
+      STATE.data = data;
+      saveCache(data);
+      return data;
+    }
+
+    // 1) fetch CSV.
+    return fetch(url, { cache: "no-store" })
+      .then(function(res){ if(!res.ok) throw new Error("Ошибка загрузки CSV: " + res.status); return res.text(); })
+      .then(function(text){ return finalize(parseCsv(text)); })
+      .catch(function(errFetch){
+        // 2) gviz JSONP.
+        return fetchViaGvizJsonp()
+          .then(function(rows){ return finalize(rows); })
+          .catch(function(errGviz){
+            // 3) На случай поздней инициализации Tilda пробуем runtime ещё раз.
+            var runtimeLate = loadFromTildaRuntime();
+            if(runtimeLate){ STATE.data = runtimeLate; saveCache(runtimeLate); return runtimeLate; }
+            // 4) Старый кэш.
+            var stale = loadStaleCache();
+            if(stale){ STATE.data = stale; return stale; }
+            throw new Error("Не удалось загрузить таблицу: runtime/fetch/gviz/cache. fetch=" + errFetch.message + "; gviz=" + errGviz.message);
+          });
+      });
+  }
+
+  function optionFill(select, list, placeholder){
     if(!select) return;
-    select.innerHTML = "";
-    var o0 = document.createElement("option");
-    o0.value=""; o0.disabled=true; o0.selected=true; o0.textContent=placeholder;
-    select.appendChild(o0);
-    for(var i=0;i<items.length;i++){
-      var opt=document.createElement("option");
-      opt.value=items[i]; opt.textContent=items[i];
-      select.appendChild(opt);
+    while(select.firstChild) select.removeChild(select.firstChild);
+    var ph = document.createElement("option");
+    ph.value = ""; ph.text = placeholder; ph.disabled = true; ph.selected = true;
+    select.appendChild(ph);
+    for(var i=0;i<list.length;i++){
+      var op = document.createElement("option");
+      op.value = list[i];
+      op.text = list[i];
+      select.appendChild(op);
     }
   }
 
@@ -366,180 +723,253 @@
     };
   }
 
-  function saveSelection(brand, series, body){
-    try{ localStorage.setItem("tcf_selection", JSON.stringify({brand:brand,series:series,body:body})); }catch(e){}
+  function saveSelection(sel){
+    try{ localStorage.setItem(CFG.FILTER.STORAGE_KEY_SELECTION, JSON.stringify(sel)); }catch(e){}
   }
-  function loadSelection(){
-    try{ var raw = localStorage.getItem("tcf_selection"); if(!raw) return null; return JSON.parse(raw); }catch(e){ return null; }
-  }
-
-  function updateSeries(data, brand){
-    var list = (data.tree[brand]) ? Object.keys(data.tree[brand]).sort() : [];
-    fillSelect(getUI().dSeries, list, "Выберите серию");
-    fillSelect(getUI().mSeries, list, "Выберите серию");
-    fillSelect(getUI().dBody, [], "Выберите кузов");
-    fillSelect(getUI().mBody, [], "Выберите кузов");
+  function readSelection(){
+    try{ var raw = localStorage.getItem(CFG.FILTER.STORAGE_KEY_SELECTION); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
   }
 
-  function updateBodies(data, brand, series){
-    var bodies = (data.tree[brand] && data.tree[brand][series]) ? data.tree[brand][series] : [];
-    fillSelect(getUI().dBody, bodies, "Выберите кузов");
-    fillSelect(getUI().mBody, bodies, "Выберите кузов");
-  }
+  function syncPair(a, b, value){ if(a) a.value = value || ""; if(b) b.value = value || ""; }
 
-  function initUI(data){
+  function updateSeriesOptions(data, brand){
     var ui = getUI();
-    var brands = data.brands || [];
-    fillSelect(ui.dBrand, brands, "Выберите марку");
-    fillSelect(ui.mBrand, brands, "Выберите марку");
-    fillSelect(ui.dSeries, [], "Выберите серию");
-    fillSelect(ui.mSeries, [], "Выберите серию");
-    fillSelect(ui.dBody, [], "Выберите кузов");
-    fillSelect(ui.mBody, [], "Выберите кузов");
-
-    var saved = loadSelection();
-    if(saved && saved.brand){
-      ui.dBrand.value = saved.brand; ui.mBrand.value = saved.brand;
-      updateSeries(data, saved.brand);
-      if(saved.series){
-        ui.dSeries.value = saved.series; ui.mSeries.value = saved.series;
-        updateBodies(data, saved.brand, saved.series);
-        if(saved.body){
-          ui.dBody.value = saved.body; ui.mBody.value = saved.body;
-        }
-      }
-    }
-
-    if(ui.dBrand) ui.dBrand.addEventListener("change", function(){ updateSeries(data, this.value); updateBodies(data, this.value, null); saveSelection(this.value,"",""); });
-    if(ui.mBrand) ui.mBrand.addEventListener("change", function(){ updateSeries(data, this.value); updateBodies(data, this.value, null); saveSelection(this.value,"",""); });
-
-    if(ui.dSeries) ui.dSeries.addEventListener("change", function(){ updateBodies(data, ui.dBrand.value, this.value); saveSelection(ui.dBrand.value,this.value,""); });
-    if(ui.mSeries) ui.mSeries.addEventListener("change", function(){ updateBodies(data, ui.mBrand.value, this.value); saveSelection(ui.mBrand.value,this.value,""); });
-
-    if(ui.dBody) ui.dBody.addEventListener("change", function(){ saveSelection(ui.dBrand.value, ui.dSeries.value, this.value); });
-    if(ui.mBody) ui.mBody.addEventListener("change", function(){ saveSelection(ui.mBrand.value, ui.mSeries.value, this.value); });
-
-    if(ui.dApply) ui.dApply.addEventListener("click", applyFilter);
-    if(ui.mApply) ui.mApply.addEventListener("click", applyFilter);
+    var list = data.tree[brand] ? Object.keys(data.tree[brand]).sort() : [];
+    optionFill(ui.dSeries, list, "Выберите серию");
+    optionFill(ui.mSeries, list, "Выберите серию");
+    optionFill(ui.dBody, [], "Выберите кузов");
+    optionFill(ui.mBody, [], "Выберите кузов");
   }
 
-  function getStoreGrid(){
-    var candidates = SETTINGS.STORE.gridSelector.split(",");
-    for(var i=0;i<candidates.length;i++){
-      var el = document.querySelector(candidates[i].trim());
-      if(el) return el;
-    }
-    return null;
+  function updateBodyOptions(data, brand, series){
+    var ui = getUI();
+    var list = (data.tree[brand] && data.tree[brand][series]) ? data.tree[brand][series] : [];
+    optionFill(ui.dBody, list, "Выберите кузов");
+    optionFill(ui.mBody, list, "Выберите кузов");
   }
+
+  function getStoreParts(){
+    var grid = firstBySelectors(CFG.STORE.GRID_SELECTOR);
+    var root = firstBySelectors(CFG.STORE.ROOT_SELECTOR) || (grid ? grid.parentNode : null);
+    var showMore = firstBySelectors(CFG.STORE.SHOW_MORE_SELECTOR, root || document);
+    return { root: root, grid: grid, showMore: showMore };
+  }
+
   function getCards(grid){
     if(!grid) return [];
-    var list = grid.querySelectorAll(SETTINGS.STORE.cardSelector);
+    var list = grid.querySelectorAll(CFG.STORE.CARD_SELECTOR);
     return Array.prototype.slice.call(list || []);
   }
-  function getCardUid(card){
-    if(!card) return "";
-    var dataUid = card.getAttribute("data-product-uid") || card.getAttribute("data-product-id") || card.getAttribute("data-uid");
-    if(dataUid) return String(dataUid).trim();
-    var link = card.querySelector(SETTINGS.CARD.linkSelector);
-    var href = link ? link.getAttribute("href") : "";
+
+  function extractCardUid(card){
+    var attrs = ["data-product-uid", "data-product-id", "data-uid", "data-product-gen-uid"];
+    for(var i=0;i<attrs.length;i++){
+      var v = norm(card.getAttribute(attrs[i]));
+      if(v) return v;
+    }
+    var link = card.querySelector(CFG.CARD.LINK_SELECTOR);
+    var href = link ? norm(link.getAttribute("href")) : "";
     if(!href) return "";
-    var m = href.match(/\/tproduct\/\d+\-(\d+)/i);
-    return (m && m[1]) ? m[1] : "";
-  }
-  function getCardTitle(card){
-    if(!card) return "";
-    var tEl = card.querySelector(SETTINGS.CARD.titleSelector);
-    return tEl ? norm(tEl.textContent) : "";
+    var m = href.match(CFG.CARD.UID_REGEX);
+    return m && m[1] ? m[1] : "";
   }
 
-  function showNoResults(show){
-    var el = document.getElementById("tcf-noresults");
-    if(el) el.style.display = show ? "block" : "none";
+  function extractCardTitle(card){
+    var t = card.querySelector(CFG.CARD.TITLE_SELECTOR);
+    return t ? norm(t.textContent) : "";
+  }
+
+  function getOrCreateResultsContainer(parts){
+    var id = "tcf-results-grid";
+    var box = document.getElementById(id);
+    if(!box){
+      box = document.createElement("div");
+      box.id = id;
+      box.style.display = "none";
+      box.style.width = "100%";
+      box.style.flexWrap = "wrap";
+      box.style.alignItems = "stretch";
+      box.style.justifyContent = "flex-start";
+      box.style.gap = "20px";
+      box.style.marginTop = "0";
+      box.style.boxSizing = "border-box";
+      box.className = "tcf-results-grid";
+      if(parts.grid && parts.grid.parentNode){
+        parts.grid.parentNode.insertBefore(box, parts.grid.nextSibling);
+      }
+    }
+    return box;
+  }
+
+  function setNoResultMessage(show){
+    var msg = document.getElementById("tcf-noresults");
+    if(!msg){
+      msg = document.createElement("div");
+      msg.id = "tcf-noresults";
+      msg.innerHTML = CFG.FILTER.NO_RESULTS_TEXT;
+      document.body.appendChild(msg);
+    }
+    msg.style.display = show ? "block" : "none";
   }
 
   function resetFilter(){
-    var grid = getStoreGrid();
-    if(!grid) return;
-    var cards = getCards(grid);
-    for(var c=0;c<cards.length;c++){
-      cards[c].classList.remove("tcf-card-hidden");
+    STATE.activeFilter = null;
+    var parts = getStoreParts();
+    var resultGrid = document.getElementById("tcf-results-grid");
+    if(resultGrid){
+      resultGrid.style.display = "none";
+      while(resultGrid.firstChild) resultGrid.removeChild(resultGrid.firstChild);
     }
-    showNoResults(false);
+    if(parts.grid) parts.grid.style.display = "";
+    if(parts.showMore) parts.showMore.style.display = "";
+    setNoResultMessage(false);
   }
 
-  function filterDom(matches){
-    var grid = getStoreGrid();
-    if(!grid) return;
-    var cards = getCards(grid);
-    if(!cards.length) return;
-
-    var allowedUID = {}, allowedTitle = {}, allowedTitleList = [];
+  function buildAllowedIndex(matches){
+    var out = { uid: {}, title: {} };
     for(var i=0;i<matches.length;i++){
-      if(matches[i].uid) allowedUID[matches[i].uid] = true;
-      if(matches[i].title){
-        var titleKey = up(matches[i].title);
-        allowedTitle[titleKey] = true;
-        allowedTitleList.push(titleKey);
-      }
+      if(matches[i].uid) out.uid[matches[i].uid] = true;
+      if(matches[i].titleKey) out.title[matches[i].titleKey] = true;
     }
+    return out;
+  }
 
-    var found = 0;
-    for(var c=0;c<cards.length;c++){
-      var card = cards[c];
-      var uid = getCardUid(card);
-      var title = key(getCardTitle(card));
+  function cloneCard(card){
+    var clone = card.cloneNode(true);
+    clone.style.display = "";
+    clone.className = card.className;
+    return clone;
+  }
+
+  function applyFilterToDom(selection){
+    if(!STATE.data) return;
+    var brand = selection.brand;
+    var series = selection.series;
+    var body = selection.body;
+    var matches = (((STATE.data.mapping[brand] || {})[series] || {})[body]) || [];
+    var allow = buildAllowedIndex(matches);
+
+    var parts = getStoreParts();
+    if(!parts.grid) return;
+    var cards = getCards(parts.grid);
+    var resultGrid = getOrCreateResultsContainer(parts);
+    while(resultGrid.firstChild) resultGrid.removeChild(resultGrid.firstChild);
+
+    var visible = 0;
+    for(var i=0;i<cards.length;i++){
+      var uid = extractCardUid(cards[i]);
+      var titleKey = safeKey(extractCardTitle(cards[i]));
       var ok = false;
-      if(uid && allowedUID[uid]) ok = true;
-      if(!ok && title && allowedTitle[title]) ok = true;
-      if(!ok && title && allowedTitleList.length){
-        for(var t=0;t<allowedTitleList.length;t++){
-          var allowed = allowedTitleList[t];
-          if(title.indexOf(allowed) !== -1 || allowed.indexOf(title) !== -1){
-            ok = true;
-            break;
-          }
-        }
-      }
-
-      if(ok){
-        card.classList.remove("tcf-card-hidden");
-        found++;
-      }else{
-        card.classList.add("tcf-card-hidden");
-      }
+      if(uid && allow.uid[uid]) ok = true;
+      if(!ok && titleKey && allow.title[titleKey]) ok = true;
+      if(ok){ resultGrid.appendChild(cloneCard(cards[i])); visible++; }
     }
 
-    showNoResults(found === 0);
-    try{ grid.scrollIntoView({behavior:"smooth", block:"start"}); }catch(e){}
+    parts.grid.style.display = "none";
+    if(parts.showMore) parts.showMore.style.display = "none";
+    resultGrid.style.display = "flex";
+
+    if(visible === 0){
+      setNoResultMessage(true);
+      resetFilter();
+    }else{
+      setNoResultMessage(false);
+      try{ resultGrid.scrollIntoView({ behavior: "smooth", block: "start" }); }catch(e){}
+    }
   }
 
   function applyFilter(){
-    loadSheet().then(function(data){
-      var ui = getUI();
-      var brand = ui.dBrand && ui.dBrand.value ? ui.dBrand.value : (ui.mBrand ? ui.mBrand.value : "");
-      var series = ui.dSeries && ui.dSeries.value ? ui.dSeries.value : (ui.mSeries ? ui.mSeries.value : "");
-      var body = ui.dBody && ui.dBody.value ? ui.dBody.value : (ui.mBody ? ui.mBody.value : "");
+    var ui = getUI();
+    var brand = norm((ui.dBrand && ui.dBrand.value) || (ui.mBrand && ui.mBrand.value));
+    var series = norm((ui.dSeries && ui.dSeries.value) || (ui.mSeries && ui.mSeries.value));
+    var body = norm((ui.dBody && ui.dBody.value) || (ui.mBody && ui.mBody.value));
+    if(!brand || !series || !body){ alert("Выберите марку, серию и кузов."); return; }
 
-      if(!brand || !series || !body){ alert("Выберите марку, серию и кузов."); return; }
-
-      var matches = (((data.index[brand] || {})[series] || {})[body]) || [];
-      filterDom(matches);
-    });
+    var sel = { brand: brand, series: series, body: body };
+    STATE.activeFilter = sel;
+    saveSelection(sel);
+    applyFilterToDom(sel);
   }
 
-  function observeCatalog(){
-    var grid = getStoreGrid();
-    if(!grid) return;
-    var observer = new MutationObserver(function(){
-      var saved = loadSelection();
-      if(saved && saved.brand && saved.series && saved.body){ applyFilter(); }
+  function bindUi(data){
+    var ui = getUI();
+    optionFill(ui.dBrand, data.brands, "Выберите марку");
+    optionFill(ui.mBrand, data.brands, "Выберите марку");
+    optionFill(ui.dSeries, [], "Выберите серию");
+    optionFill(ui.mSeries, [], "Выберите серию");
+    optionFill(ui.dBody, [], "Выберите кузов");
+    optionFill(ui.mBody, [], "Выберите кузов");
+
+    function onBrandChanged(value){
+      syncPair(ui.dBrand, ui.mBrand, value);
+      updateSeriesOptions(data, value);
+      saveSelection({ brand: value, series: "", body: "" });
+      resetFilter();
+    }
+
+    function onSeriesChanged(value){
+      var b = norm((ui.dBrand && ui.dBrand.value) || (ui.mBrand && ui.mBrand.value));
+      syncPair(ui.dSeries, ui.mSeries, value);
+      updateBodyOptions(data, b, value);
+      saveSelection({ brand: b, series: value, body: "" });
+      resetFilter();
+    }
+
+    function onBodyChanged(value){
+      var b = norm((ui.dBrand && ui.dBrand.value) || (ui.mBrand && ui.mBrand.value));
+      var s = norm((ui.dSeries && ui.dSeries.value) || (ui.mSeries && ui.mSeries.value));
+      syncPair(ui.dBody, ui.mBody, value);
+      saveSelection({ brand: b, series: s, body: value });
+    }
+
+    if(ui.dBrand) ui.dBrand.addEventListener("change", function(){ onBrandChanged(this.value); });
+    if(ui.mBrand) ui.mBrand.addEventListener("change", function(){ onBrandChanged(this.value); });
+    if(ui.dSeries) ui.dSeries.addEventListener("change", function(){ onSeriesChanged(this.value); });
+    if(ui.mSeries) ui.mSeries.addEventListener("change", function(){ onSeriesChanged(this.value); });
+    if(ui.dBody) ui.dBody.addEventListener("change", function(){ onBodyChanged(this.value); });
+    if(ui.mBody) ui.mBody.addEventListener("change", function(){ onBodyChanged(this.value); });
+
+    if(ui.dApply) ui.dApply.addEventListener("click", applyFilter);
+    if(ui.mApply) ui.mApply.addEventListener("click", applyFilter);
+
+    var saved = readSelection();
+    if(saved && saved.brand){
+      syncPair(ui.dBrand, ui.mBrand, saved.brand);
+      updateSeriesOptions(data, saved.brand);
+      if(saved.series){
+        syncPair(ui.dSeries, ui.mSeries, saved.series);
+        updateBodyOptions(data, saved.brand, saved.series);
+        if(saved.body) syncPair(ui.dBody, ui.mBody, saved.body);
+      }
+    }
+  }
+
+  /*
+    MutationObserver нужен, чтобы повторно применить фильтр после
+    "Показать ещё" или внутренних перерисовок ST320N.
+  */
+  function setupObserver(){
+    var parts = getStoreParts();
+    if(!parts.grid || !window.MutationObserver) return;
+    if(STATE.observer) STATE.observer.disconnect();
+
+    STATE.observer = new MutationObserver(function(){
+      if(!STATE.activeFilter) return;
+      if(STATE.debounceTimer) window.clearTimeout(STATE.debounceTimer);
+      STATE.debounceTimer = window.setTimeout(function(){ applyFilterToDom(STATE.activeFilter); }, 180);
     });
-    observer.observe(grid, { childList:true, subtree:true });
+    STATE.observer.observe(parts.grid, { childList: true, subtree: true });
   }
 
   function init(){
-    loadSheet().then(function(data){ initUI(data); observeCatalog(); })
-      .catch(function(e){ alert("Ошибка загрузки данных: " + e.message); });
+    fetchData()
+      .then(function(data){
+        bindUi(data);
+        setupObserver();
+      })
+      .catch(function(err){
+        alert("Ошибка загрузки данных фильтра: " + err.message + "\nПроверьте: 1) CFG.SHEET.SHEET_PUBHTML_URL/CSV_URL/GID/SHEET_ID, 2) опубликована ли таблица, 3) нет ли блокировок сети/VPN.");
+      });
   }
 
   if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
@@ -547,8 +977,11 @@
 })();
 </script>
 
-<!-- ЧЕК-ЛИСТ:
-1) Если селекты пустые — проверьте ссылку SHEET_PUBHTML_URL.
-2) Если фильтр не видит карточки — проверьте STORE.gridSelector и STORE.cardSelector.
-3) Если не видит UID — проверьте CARD.linkSelector.
-4) Если фильтр не скрывает карточки — проверьте STORE.gridSelector / STORE.cardSelector и класс tcf-card-hidden. -->
+<!-- ЧЕК-ЛИСТ (если что-то не работает):
+1) Селекты пустые: проверьте CFG.SHEET.SHEET_PUBHTML_URL/CSV_URL/GID и имена колонок в CFG.SHEET.COLUMNS.
+2) Карточки не находятся: проверьте CFG.STORE.GRID_SELECTOR и CFG.STORE.CARD_SELECTOR по DOM вашего ST320N.
+3) UID не извлекается: проверьте CFG.CARD.LINK_SELECTOR и CFG.CARD.UID_REGEX.
+4) Нет совпадений при очевидно правильном выборе: проверьте формат "Characteristics:Совместимость" (строго через ";").
+5) Видите старые данные: временно включите CFG.CACHE.FORCE_REFRESH = true.
+6) Если "failed to fetch": фильтр теперь сначала читает данные из каталога Tilda; если брендов 0 — включите CFG.DBG=true и пришлите логи.
+7) Для JSONP-фолбэка можно явно указать CFG.SHEET.SHEET_ID (из URL /d/e/<ID>). -->
